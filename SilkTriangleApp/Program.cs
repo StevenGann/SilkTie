@@ -17,7 +17,7 @@ class Program
         windowManager.Run();
 
         // Wait for the renderer to be initialized and texture to be loaded
-        Console.WriteLine("Waiting for renderer to be initialized...");
+        Console.Write("Waiting for renderer to be initialized");
         while (renderer2D.DefaultTextureHandle == 0)
         {
             Thread.Sleep(100);
@@ -25,7 +25,7 @@ class Program
         }
 
         // Now it's safe to create sprites
-        Console.WriteLine("Renderer initialized, creating sprites...");
+        Console.WriteLine("\nRenderer initialized, creating sprites...");
 
         var sprites = new List<Sprite>();
         for (int x = -2; x <= 2; x++)
@@ -53,7 +53,7 @@ class Program
         // Simulate some work on the main thread with animated sprites
         for (int i = 0; i < 1000; i++)
         {
-            Thread.Sleep(8); // Simulate work
+            Thread.Sleep(16); // Simulate work
 
             // Create new sprites with updated animations
             var updatedSprites = new List<Sprite>();
