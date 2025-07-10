@@ -209,6 +209,35 @@ public class Renderer2D : IRenderer
     private int _transformMatrixLocation;
 
     /// <summary>
+    /// Location of the texture uniform in the shader program.
+    /// </summary>
+    /// <remarks>
+    /// This location is obtained during shader program creation and is used
+    /// to update the texture uniform during rendering.
+    /// </remarks>
+    private int _textureUniformLocation;
+
+    /// <summary>
+    /// Collection of sprites to render.
+    /// </summary>
+    /// <remarks>
+    /// This list stores all sprites that should be rendered each frame.
+    /// Sprites are rendered in the order they appear in this list.
+    /// The list is designed for efficient iteration and modification.
+    /// </remarks>
+    private readonly List<Sprite> _sprites = new();
+    private readonly object _spritesLock = new object();
+
+    /// <summary>
+    /// Flag indicating whether the sprite collection has been modified.
+    /// </summary>
+    /// <remarks>
+    /// This flag is used to optimize rendering by avoiding unnecessary
+    /// operations when no sprites have been added or removed.
+    /// </remarks>
+    private bool _spritesModified = false;
+
+    /// <summary>
     /// Initializes the 2D renderer with the specified window and OpenGL context.
     /// </summary>
     /// <param name="window">The window to associate with this renderer.</param>
@@ -404,6 +433,9 @@ public class Renderer2D : IRenderer
 
         // Get uniform locations
         _transformMatrixLocation = _gl.GetUniformLocation(_shaderProgram, "uTransform");
+        _textureUniformLocation = _gl.GetUniformLocation(_shaderProgram, "uTexture");
+        
+
 
         // Create and configure texture
         _texture = _gl.GenTexture();
@@ -446,6 +478,8 @@ public class Renderer2D : IRenderer
 
             // Generate mipmaps for better quality when texture is scaled down
             _gl.GenerateMipmap(TextureTarget.Texture2D);
+            
+
         }
         catch (FileNotFoundException)
         {
@@ -453,13 +487,17 @@ public class Renderer2D : IRenderer
             Console.WriteLine("Warning: texture.png not found. Creating a simple colored texture instead.");
             CreateFallbackTexture();
         }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading texture: {ex.Message}");
+            CreateFallbackTexture();
+        }
 
         // Unbind texture as we no longer need to update it
         _gl.BindTexture(TextureTarget.Texture2D, 0);
 
         // Set texture uniform to use texture unit 0
-        int location = _gl.GetUniformLocation(_shaderProgram, "uTexture");
-        _gl.Uniform1(location, 0);
+        _gl.Uniform1(_textureUniformLocation, 0);
 
         // Enable alpha blending for transparency support
         _gl.Enable(EnableCap.Blend);
@@ -534,6 +572,8 @@ public class Renderer2D : IRenderer
         _gl.TextureParameter(_texture, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
         _gl.TextureParameter(_texture, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         _gl.GenerateMipmap(TextureTarget.Texture2D);
+        
+
     }
 
     /// <summary>
@@ -647,6 +687,207 @@ public class Renderer2D : IRenderer
     }
 
     /// <summary>
+    /// Adds a sprite to the renderer.
+    /// </summary>
+    /// <param name="sprite">The sprite to add.</param>
+    /// <remarks>
+    /// This method adds a sprite to the internal collection for rendering.
+    /// The sprite will be rendered in the next frame and all subsequent frames
+    /// until it is removed. Sprites are rendered in the order they were added.
+    /// 
+    /// This method is thread-safe and can be called from any thread.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var sprite = new Sprite(
+    ///     new Vector2(0.5f, 0.0f),           // Position
+    ///     new Vector2(1.0f, 1.0f),           // Scale
+    ///     45.0f * MathF.PI / 180.0f,         // Rotation
+    ///     textureId                          // Texture handle
+    /// );
+    /// renderer.AddSprite(sprite);
+    /// </code>
+    /// </example>
+    public void AddSprite(Sprite sprite)
+    {
+        lock (_spritesLock)
+        {
+            _sprites.Add(sprite);
+            _spritesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Adds multiple sprites to the renderer.
+    /// </summary>
+    /// <param name="sprites">The sprites to add.</param>
+    /// <remarks>
+    /// This method adds multiple sprites to the internal collection for rendering.
+    /// This is more efficient than calling AddSprite multiple times for large
+    /// collections of sprites.
+    /// 
+    /// This method is thread-safe and can be called from any thread.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var sprites = new List&lt;Sprite&gt;
+    /// {
+    ///     Sprite.CreateAt(new Vector2(0.5f, 0.0f), textureId1),
+    ///     Sprite.CreateAt(new Vector2(-0.5f, 0.0f), textureId2),
+    ///     Sprite.CreateAt(new Vector2(0.0f, 0.5f), textureId3)
+    /// };
+    /// renderer.AddSprites(sprites);
+    /// </code>
+    /// </example>
+    public void AddSprites(IEnumerable<Sprite> sprites)
+    {
+        lock (_spritesLock)
+        {
+            _sprites.AddRange(sprites);
+            _spritesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Removes a sprite from the renderer.
+    /// </summary>
+    /// <param name="sprite">The sprite to remove.</param>
+    /// <returns>True if the sprite was found and removed, false otherwise.</returns>
+    /// <remarks>
+    /// This method removes a sprite from the internal collection.
+    /// The sprite will no longer be rendered in subsequent frames.
+    /// 
+    /// This method uses reference equality to find the sprite to remove.
+    /// If you have multiple sprites with the same properties, you may need
+    /// to use RemoveSpriteAt or ClearSprites instead.
+    /// 
+    /// This method is thread-safe and can be called from any thread.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var sprite = Sprite.CreateAt(new Vector2(0.5f, 0.0f), textureId);
+    /// renderer.AddSprite(sprite);
+    /// // ... later ...
+    /// renderer.RemoveSprite(sprite);
+    /// </code>
+    /// </example>
+    public bool RemoveSprite(Sprite sprite)
+    {
+        lock (_spritesLock)
+        {
+            var removed = _sprites.Remove(sprite);
+            if (removed)
+            {
+                _spritesModified = true;
+            }
+            return removed;
+        }
+    }
+
+    /// <summary>
+    /// Removes a sprite at the specified index.
+    /// </summary>
+    /// <param name="index">The index of the sprite to remove.</param>
+    /// <remarks>
+    /// This method removes a sprite at the specified index from the internal collection.
+    /// The sprite will no longer be rendered in subsequent frames.
+    /// 
+    /// This method is useful when you know the exact index of the sprite you want
+    /// to remove, which can be more efficient than RemoveSprite for large collections.
+    /// 
+    /// This method is thread-safe and can be called from any thread.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// renderer.RemoveSpriteAt(0); // Remove the first sprite
+    /// </code>
+    /// </example>
+    public void RemoveSpriteAt(int index)
+    {
+        lock (_spritesLock)
+        {
+            if (index >= 0 && index < _sprites.Count)
+            {
+                _sprites.RemoveAt(index);
+                _spritesModified = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clears all sprites from the renderer.
+    /// </summary>
+    /// <remarks>
+    /// This method removes all sprites from the internal collection.
+    /// No sprites will be rendered in subsequent frames until new ones are added.
+    /// 
+    /// This method is thread-safe and can be called from any thread.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// renderer.ClearSprites(); // Remove all sprites
+    /// </code>
+    /// </example>
+    public void ClearSprites()
+    {
+        lock (_spritesLock)
+        {
+            _sprites.Clear();
+            _spritesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of sprites currently in the renderer.
+    /// </summary>
+    /// <returns>The number of sprites.</returns>
+    /// <remarks>
+    /// This property returns the current count of sprites in the internal collection.
+    /// This can be useful for debugging or performance monitoring.
+    /// </remarks>
+    public int SpriteCount 
+    { 
+        get 
+        { 
+            lock (_spritesLock) 
+            { 
+                return _sprites.Count; 
+            } 
+        } 
+    }
+
+    /// <summary>
+    /// Gets a read-only view of the sprites in the renderer.
+    /// </summary>
+    /// <returns>A read-only collection of sprites.</returns>
+    /// <remarks>
+    /// This property provides a read-only view of the internal sprite collection.
+    /// This is useful for debugging or when you need to inspect the sprites
+    /// without modifying them.
+    /// </remarks>
+    public IReadOnlyList<Sprite> Sprites 
+    { 
+        get 
+        { 
+            lock (_spritesLock) 
+            { 
+                return _sprites.AsReadOnly(); 
+            } 
+        } 
+    }
+
+    /// <summary>
+    /// Gets the default texture handle used by the renderer.
+    /// </summary>
+    /// <returns>The OpenGL texture handle.</returns>
+    /// <remarks>
+    /// This property provides access to the default texture that was loaded
+    /// during initialization. This is useful for creating sprites that use
+    /// the same texture as the renderer's fallback texture.
+    /// </remarks>
+    public uint DefaultTextureHandle => _texture;
+
+    /// <summary>
     /// Recalculates the transformation matrix from the current transformation parameters.
     /// </summary>
     /// <remarks>
@@ -673,29 +914,31 @@ public class Renderer2D : IRenderer
     }
 
     /// <summary>
-    /// Renders the 2D textured quad for the current frame.
+    /// Renders all sprites for the current frame.
     /// </summary>
     /// <param name="deltaTime">The time elapsed since the last frame in seconds.</param>
     /// <remarks>
     /// This method performs the following rendering steps:
     /// <list type="number">
     /// <item><description>Checks if OpenGL context is available</description></item>
-    /// <item><description>Updates the transformation matrix if needed</description></item>
     /// <item><description>Clears the screen with the background color</description></item>
     /// <item><description>Activates the shader program</description></item>
-    /// <item><description>Updates the transformation matrix uniform</description></item>
-    /// <item><description>Binds the texture to texture unit 0</description></item>
     /// <item><description>Binds the VAO containing vertex data</description></item>
+    /// <item><description>For each sprite:</description></item>
+    /// <item><description>Calculates the transformation matrix</description></item>
+    /// <item><description>Updates the transformation matrix uniform</description></item>
+    /// <item><description>Binds the sprite's texture</description></item>
     /// <item><description>Draws the quad using indexed rendering</description></item>
     /// </list>
     /// 
     /// The rendering process uses the modern OpenGL pipeline with shaders.
+    /// Each sprite is rendered with its own transformation matrix and texture.
     /// The vertex shader transforms the quad vertices using the transformation matrix
     /// and passes texture coordinates, and the fragment shader samples the texture
     /// to color each pixel.
     /// 
-    /// If the OpenGL context is not available, this method does nothing,
-    /// allowing the application to continue without errors.
+    /// If the OpenGL context is not available or no sprites are present,
+    /// this method does nothing, allowing the application to continue without errors.
     /// </remarks>
     /// <example>
     /// <code>
@@ -711,8 +954,18 @@ public class Renderer2D : IRenderer
             return; // Exit early if OpenGL is not initialized
         }
 
-        // Update transformation matrix if needed
-        UpdateTransformMatrix();
+        // Get a thread-safe copy of the sprites list
+        List<Sprite> spritesToRender;
+        lock (_spritesLock)
+        {
+            if (_sprites.Count == 0)
+            {
+                return; // Exit early if no sprites to render
+            }
+            spritesToRender = new List<Sprite>(_sprites);
+        }
+
+
 
         // Clear the screen with the background color
         // This ensures we start with a clean slate each frame
@@ -721,32 +974,60 @@ public class Renderer2D : IRenderer
         // Activate the shader program
         // This tells OpenGL which shaders to use for rendering
         _gl.UseProgram(_shaderProgram);
+        
 
-        // Update the transformation matrix uniform
-        // This passes the transformation matrix to the vertex shader
-        unsafe
-        {
-            fixed (float* matrixPtr = &_transformMatrix.M11)
-            {
-                _gl.UniformMatrix4(_transformMatrixLocation, 1, false, matrixPtr);
-            }
-        }
-
-        // Bind the texture to texture unit 0
-        // This makes the texture available to the fragment shader
-        _gl.ActiveTexture(TextureUnit.Texture0);
-        _gl.BindTexture(TextureTarget.Texture2D, _texture);
 
         // Bind the VAO containing our vertex data
         // This activates the vertex attribute configuration we set up during initialization
         _gl.BindVertexArray(_vao);
 
-        // Draw the quad using indexed rendering
-        // This sends the rendering command to the GPU
-        // Parameters: primitive type, number of indices, index type, offset
-        unsafe
+        // Render each sprite
+        foreach (var sprite in spritesToRender)
         {
-            _gl.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedInt, (void*)0);
+            // Calculate transformation matrix for this sprite
+            var translationMatrix = Matrix4x4.CreateTranslation(sprite.Position.X, sprite.Position.Y, 0.0f);
+            var scaleMatrix = Matrix4x4.CreateScale(sprite.Scale.X, sprite.Scale.Y, 1.0f);
+            var rotationMatrix = Matrix4x4.CreateRotationZ(sprite.Rotation);
+
+            // Combine transformations: translation * scale * rotation
+            var transformMatrix = translationMatrix * scaleMatrix * rotationMatrix;
+
+            // Update the transformation matrix uniform
+            // This passes the transformation matrix to the vertex shader
+            unsafe
+            {
+                var matrixArray = new float[16]
+                {
+                    transformMatrix.M11, transformMatrix.M12, transformMatrix.M13, transformMatrix.M14,
+                    transformMatrix.M21, transformMatrix.M22, transformMatrix.M23, transformMatrix.M24,
+                    transformMatrix.M31, transformMatrix.M32, transformMatrix.M33, transformMatrix.M34,
+                    transformMatrix.M41, transformMatrix.M42, transformMatrix.M43, transformMatrix.M44
+                };
+                fixed (float* matrixPtr = matrixArray)
+                {
+                    _gl.UniformMatrix4(_transformMatrixLocation, 1, false, matrixPtr);
+                }
+            }
+
+            // Bind the sprite's texture to texture unit 0
+            // This makes the texture available to the fragment shader
+            _gl.ActiveTexture(TextureUnit.Texture0);
+            _gl.BindTexture(TextureTarget.Texture2D, sprite.TextureHandle);
+            
+            // Update the texture uniform to use texture unit 0
+            _gl.Uniform1(_textureUniformLocation, 0);
+            
+
+            
+
+
+            // Draw the quad using indexed rendering
+            // This sends the rendering command to the GPU
+            // Parameters: primitive type, number of indices, index type, offset
+            unsafe
+            {
+                _gl.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedInt, (void*)0);
+            }
         }
     }
 
