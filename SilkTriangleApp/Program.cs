@@ -1,8 +1,33 @@
 ﻿using System.Threading;
+using System.Numerics;
 using SilkTriangleApp;
 
 class Program
 {
+    // Benchmark configuration
+    private const int MaxSprites = 100_000;
+    private const int SpriteIncrement = 1000;
+    private const int TargetFPS = 60;
+    
+    // Bunny physics record
+    private record struct Bunny
+    {
+        public Vector2 Position;
+        public Vector2 Speed;
+        public Vector2 Scale;
+        public float Rotation;
+        public uint TextureHandle;
+        
+        public Bunny(Vector2 position, Vector2 speed, Vector2 scale, uint textureHandle)
+        {
+            Position = position;
+            Speed = speed;
+            Scale = scale;
+            Rotation = 0.0f;
+            TextureHandle = textureHandle;
+        }
+    }
+
     static void Main(string[] args)
     {
         using var windowManager = new WindowManager();
@@ -13,7 +38,7 @@ class Program
         windowManager.AddRenderer(new RendererGUI());
         
         // Create and start the window (non-blocking)
-        windowManager.CreateWindow();
+        windowManager.CreateWindow("Silk.NET Bunnymark Benchmark", 800, 600);
         windowManager.Run();
 
         // Wait for the renderer to be initialized and texture to be loaded
@@ -25,63 +50,115 @@ class Program
         }
 
         // Now it's safe to create sprites
-        Console.WriteLine("\nRenderer initialized, creating sprites...");
+        Console.WriteLine("\nRenderer initialized, creating bunnies...");
 
+        // Initialize bunny storage
+        var bunnies = new Bunny[MaxSprites];
+        int bunnyCount = 0;
+        
+        // Add initial batch of bunnies
+        AddBunnies(ref bunnyCount, bunnies, SpriteIncrement, renderer2D.DefaultTextureHandle);
+        
+        // Convert bunnies to sprites and add to renderer
         var sprites = new List<Sprite>();
-        for (int x = -2; x <= 2; x++)
+        for (int i = 0; i < bunnyCount; i++)
         {
-            for (int y = -2; y <= 2; y++)
-            {
-                var sprite = new Sprite(
-                    new System.Numerics.Vector2(x * 0.3f, y * 0.3f),
-                    new System.Numerics.Vector2(0.8f, 0.8f),
-                    0.0f,
-                    renderer2D.DefaultTextureHandle
-                );
-                sprites.Add(sprite);
-            }
+            sprites.Add(new Sprite(
+                bunnies[i].Position,
+                bunnies[i].Scale,
+                bunnies[i].Rotation,
+                bunnies[i].TextureHandle
+            ));
         }
         renderer2D.AddSprites(sprites);
-        Console.WriteLine($"Added {sprites.Count} sprites to renderer");
-
-
-
-        // Main thread continues immediately
+        
+        Console.WriteLine($"Added {bunnyCount} bunnies to renderer");
         Console.WriteLine("Window started on separate thread. Main thread continues...");
         Console.WriteLine("Main thread is free to do other work...");
 
-        // Simulate some work on the main thread with animated sprites
+        // Main simulation loop
         int frameCount = 0;
         while (windowManager.IsRunning)
         {
-            // Update existing sprites with new animations
-            float time = frameCount * 0.005f;
-            for (int j = 0; j < sprites.Count; j++)
+            // Update bunny physics
+            UpdateBunnies(bunnies, bunnyCount, 800, 600);
+            
+            // Update sprites with new bunny data
+            for (int i = 0; i < bunnyCount; i++)
             {
-                float offset = j * 0.5f;
-                float x = sprites[j].Position.X + MathF.Sin(time + offset) * 0.005f;
-                float y = sprites[j].Position.Y + MathF.Cos(time + offset) * 0.005f;
-                float scale = 0.8f + MathF.Sin(time * 2 + offset) * 0.2f;
-                float rotation = (time * 30.0f + offset * 20.0f) * MathF.PI / 180.0f;
-                
-                // Update the sprite in place using the new methods
-                renderer2D.UpdateSprite(j, 
-                    position: new System.Numerics.Vector2(x, y),
-                    scale: new System.Numerics.Vector2(scale, scale),
-                    rotation: rotation
+                renderer2D.UpdateSprite(i, 
+                    position: bunnies[i].Position,
+                    scale: bunnies[i].Scale,
+                    rotation: bunnies[i].Rotation
                 );
             }
             
             frameCount++;
-            if (frameCount % 100 == 0)
+            if (frameCount % 60 == 0) // Log every 60 frames (roughly once per second)
             {
-                Console.WriteLine($"FPS: {windowManager.CurrentFPS:F1} - Average FPS: {windowManager.AverageFPS:F1}");
+                Console.WriteLine($"Frame {frameCount} - {bunnyCount} bunnies - FPS: {windowManager.CurrentFPS:F1} - Avg FPS: {windowManager.AverageFPS:F1}");
             }
-
+            
             Thread.Sleep(1);
         }
+        
         Console.WriteLine("Window closed. Main thread work complete.");
         windowManager.WaitForWindowToClose();
         Console.WriteLine("Window closed. Main thread exiting.");
+    }
+    
+    private static void AddBunnies(ref int bunnyCount, Bunny[] bunnies, int count, uint textureHandle)
+    {
+        var random = new Random();
+        for (int i = 0; i < count && bunnyCount < MaxSprites; i++)
+        {
+            // Random position within window bounds (convert to NDC coordinates)
+            var position = new Vector2(
+                (random.Next(0, 800) / 400.0f) - 1.0f,  // Convert 0-800 to -1 to +1
+                (random.Next(0, 600) / 300.0f) - 1.0f   // Convert 0-600 to -1 to +1
+            );
+            
+            // Random speed (scaled for target FPS and NDC coordinates)
+            var speed = new Vector2(
+                (random.Next(-250, 250) / (float)TargetFPS) / 400.0f,  // Scale for NDC
+                (random.Next(-250, 250) / (float)TargetFPS) / 300.0f   // Scale for NDC
+            );
+
+            var scale = new Vector2(
+                (random.Next(10, 20) / 100.0f),
+                (random.Next(10, 20) / 100.0f)
+            );
+            
+            bunnies[bunnyCount] = new Bunny(position, speed, scale, textureHandle);
+            bunnyCount++;
+        }
+    }
+    
+    private static void UpdateBunnies(Bunny[] bunnies, int count, int screenWidth, int screenHeight)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            ref var bunny = ref bunnies[i];
+            
+            // Integrate position
+            bunny.Position += bunny.Speed;
+            
+            // Bounce off screen borders (NDC coordinates)
+            if (bunny.Position.X <= -2.0f || bunny.Position.X >= 2.0f)
+            {
+                bunny.Speed.X *= -1;
+            }
+            if (bunny.Position.Y <= -1.0f || bunny.Position.Y >= 1.0f)
+            {
+                bunny.Speed.Y *= -1;
+            }
+            
+            // Keep bunnies within bounds (NDC coordinates)
+            //bunny.Position.X = Math.Clamp(bunny.Position.X, -1.0f, 1.0f);
+            //bunny.Position.Y = Math.Clamp(bunny.Position.Y, -1.0f, 1.0f);
+            
+            // Add some rotation for visual interest
+            bunny.Rotation += 0.02f;
+        }
     }
 }
