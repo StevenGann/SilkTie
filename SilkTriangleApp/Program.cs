@@ -54,8 +54,6 @@ class Program
         int frameCount = 0;
         while (windowManager.IsRunning)
         {
-            Thread.Sleep(1); // Simulate work
-
             // Update existing sprites with new animations
             float time = frameCount * 0.005f;
             for (int j = 0; j < sprites.Count; j++)
@@ -77,8 +75,10 @@ class Program
             frameCount++;
             if (frameCount % 100 == 0)
             {
-                Console.WriteLine($"Main thread working... Frame {frameCount} - {sprites.Count} sprites animated");
+                Console.WriteLine($"FPS: {windowManager.CurrentFPS:F1} - Average FPS: {windowManager.AverageFPS:F1}");
             }
+
+            Thread.Sleep(1);
         }
         Console.WriteLine("Window closed. Main thread work complete.");
         windowManager.WaitForWindowToClose();

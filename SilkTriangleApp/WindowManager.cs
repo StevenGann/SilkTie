@@ -114,6 +114,13 @@ public class WindowManager : IDisposable
     /// </remarks>
     private bool _isDisposed;
 
+    // Framerate tracking fields
+    private double _frameTimeAccumulator = 0.0;
+    private int _frameCount = 0;
+    private double _currentFPS = 0.0;
+    private double _averageFPS = 0.0;
+    private readonly double _fpsUpdateInterval = 0.1; // Update FPS display every second
+
     /// <summary>
     /// Event fired when the window is loaded and ready for rendering.
     /// </summary>
@@ -312,6 +319,17 @@ public class WindowManager : IDisposable
     public bool IsRunning => _isRunning && _windowThread?.IsAlive == true;
 
     /// <summary>
+    /// Gets the current frames per second (FPS) of the rendering loop.
+    /// </summary>
+    /// <remarks>
+    /// This property returns the average FPS over the last second.
+    /// The FPS is updated every second to provide a stable reading.
+    /// </remarks>
+    public double CurrentFPS => _currentFPS;
+
+    public double AverageFPS => _averageFPS;
+
+    /// <summary>
     /// Waits for the window to close by joining the window thread.
     /// </summary>
     /// <remarks>
@@ -362,6 +380,7 @@ public class WindowManager : IDisposable
     /// <param name="deltaTime">The time elapsed since the last frame in seconds.</param>
     /// <remarks>
     /// This method is called each frame to render the scene. It:
+    /// - Updates framerate calculation
     /// - Renders each renderer in the order they were added
     /// - Fires the OnWindowRender event with the current delta time
     /// 
@@ -370,6 +389,19 @@ public class WindowManager : IDisposable
     /// </remarks>
     private void OnRender(double deltaTime)
     {
+        // Update framerate calculation
+        _frameTimeAccumulator += deltaTime;
+        _frameCount++;
+        
+        if (_frameTimeAccumulator >= _fpsUpdateInterval)
+        {
+            _currentFPS = _frameCount / _frameTimeAccumulator;
+            _frameTimeAccumulator = 0.0;
+            _frameCount = 0;
+            _averageFPS = (_averageFPS + _currentFPS) / 2;
+        }
+        
+        // Render all renderers
         foreach (var renderer in _renderers)
         {
             renderer.Render(deltaTime);
