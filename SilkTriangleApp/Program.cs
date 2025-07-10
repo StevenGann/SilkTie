@@ -52,7 +52,7 @@ class Program
 
         // Simulate some work on the main thread with animated sprites
         int frameCount = 0;
-        while (true)
+        while (windowManager.IsRunning)
         {
             Thread.Sleep(1); // Simulate work
 
@@ -80,8 +80,7 @@ class Program
                 Console.WriteLine($"Main thread working... Frame {frameCount} - {sprites.Count} sprites animated");
             }
         }
-        // Note: This line will never be reached due to the infinite loop above
-        Console.WriteLine("Main thread work complete. Waiting for window to close...");
+        Console.WriteLine("Window closed. Main thread work complete.");
         windowManager.WaitForWindowToClose();
         Console.WriteLine("Window closed. Main thread exiting.");
     }
