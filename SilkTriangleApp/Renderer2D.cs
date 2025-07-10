@@ -200,13 +200,31 @@ public class Renderer2D : IRenderer
     private bool _transformDirty = true;
 
     /// <summary>
-    /// Location of the transform matrix uniform in the shader program.
+    /// Location of the translation uniform in the shader program.
     /// </summary>
     /// <remarks>
     /// This location is obtained during shader program creation and is used
-    /// to update the transformation matrix uniform during rendering.
+    /// to update the translation uniform during rendering.
     /// </remarks>
-    private int _transformMatrixLocation;
+    private int _translationLocation;
+
+    /// <summary>
+    /// Location of the scale uniform in the shader program.
+    /// </summary>
+    /// <remarks>
+    /// This location is obtained during shader program creation and is used
+    /// to update the scale uniform during rendering.
+    /// </remarks>
+    private int _scaleLocation;
+
+    /// <summary>
+    /// Location of the rotation uniform in the shader program.
+    /// </summary>
+    /// <remarks>
+    /// This location is obtained during shader program creation and is used
+    /// to update the rotation uniform during rendering.
+    /// </remarks>
+    private int _rotationLocation;
 
     /// <summary>
     /// Location of the texture uniform in the shader program.
@@ -362,7 +380,8 @@ public class Renderer2D : IRenderer
         _gl.EnableVertexAttribArray(1);
 
         // Create vertex shader source code
-        // This shader transforms vertex positions using a transformation matrix and passes texture coordinates
+        // This shader transforms vertex positions using separate translation, rotation, and scale uniforms
+        // to ensure rotation happens around the sprite's center
         string vertexShaderSource = @"
             #version 330 core
             layout (location = 0) in vec3 aPosition;
@@ -370,11 +389,30 @@ public class Renderer2D : IRenderer
             
             out vec2 frag_texCoords;
             
-            uniform mat4 uTransform;
+            uniform vec2 uTranslation;
+            uniform vec2 uScale;
+            uniform float uRotation;
             
             void main()
             {
-                gl_Position = uTransform * vec4(aPosition, 1.0);
+                // Apply transformations in order: translate -> rotate -> scale
+                vec2 pos = aPosition.xy;
+                
+                // Scale first (from center)
+                pos *= uScale;
+                
+                // Rotate around center (0,0)
+                float cos_rot = cos(uRotation);
+                float sin_rot = sin(uRotation);
+                pos = vec2(
+                    pos.x * cos_rot - pos.y * sin_rot,
+                    pos.x * sin_rot + pos.y * cos_rot
+                );
+                
+                // Translate to final position
+                pos += uTranslation;
+                
+                gl_Position = vec4(pos, 0.0, 1.0);
                 frag_texCoords = aTexCoords;
             }";
 
@@ -432,7 +470,9 @@ public class Renderer2D : IRenderer
         _gl.DeleteShader(fragmentShader);
 
         // Get uniform locations
-        _transformMatrixLocation = _gl.GetUniformLocation(_shaderProgram, "uTransform");
+        _translationLocation = _gl.GetUniformLocation(_shaderProgram, "uTranslation");
+        _scaleLocation = _gl.GetUniformLocation(_shaderProgram, "uScale");
+        _rotationLocation = _gl.GetUniformLocation(_shaderProgram, "uRotation");
         _textureUniformLocation = _gl.GetUniformLocation(_shaderProgram, "uTexture");
         
 
@@ -1036,8 +1076,9 @@ public class Renderer2D : IRenderer
         var scaleMatrix = Matrix4x4.CreateScale(_scale.X, _scale.Y, 1.0f);
         var rotationMatrix = Matrix4x4.CreateRotationZ(_rotation);
 
-        // Combine transformations: translation * scale * rotation
-        _transformMatrix = translationMatrix * scaleMatrix * rotationMatrix;
+        // Combine transformations: translation * rotation * scale
+        // This ensures rotation happens around the sprite's center, not the world origin
+        _transformMatrix = translationMatrix * rotationMatrix * scaleMatrix;
 
         _transformDirty = false;
     }
@@ -1113,30 +1154,11 @@ public class Renderer2D : IRenderer
         // Render each sprite
         foreach (var sprite in spritesToRender)
         {
-            // Calculate transformation matrix for this sprite
-            var translationMatrix = Matrix4x4.CreateTranslation(sprite.Position.X, sprite.Position.Y, 0.0f);
-            var scaleMatrix = Matrix4x4.CreateScale(sprite.Scale.X, sprite.Scale.Y, 1.0f);
-            var rotationMatrix = Matrix4x4.CreateRotationZ(sprite.Rotation);
-
-            // Combine transformations: translation * scale * rotation
-            var transformMatrix = translationMatrix * scaleMatrix * rotationMatrix;
-
-            // Update the transformation matrix uniform
-            // This passes the transformation matrix to the vertex shader
-            unsafe
-            {
-                var matrixArray = new float[16]
-                {
-                    transformMatrix.M11, transformMatrix.M12, transformMatrix.M13, transformMatrix.M14,
-                    transformMatrix.M21, transformMatrix.M22, transformMatrix.M23, transformMatrix.M24,
-                    transformMatrix.M31, transformMatrix.M32, transformMatrix.M33, transformMatrix.M34,
-                    transformMatrix.M41, transformMatrix.M42, transformMatrix.M43, transformMatrix.M44
-                };
-                fixed (float* matrixPtr = matrixArray)
-                {
-                    _gl.UniformMatrix4(_transformMatrixLocation, 1, false, matrixPtr);
-                }
-            }
+            // Update the transformation uniforms
+            // These are applied in the vertex shader in the correct order
+            _gl.Uniform2(_translationLocation, sprite.Position.X, sprite.Position.Y);
+            _gl.Uniform2(_scaleLocation, sprite.Scale.X, sprite.Scale.Y);
+            _gl.Uniform1(_rotationLocation, sprite.Rotation);
 
             // Bind the sprite's texture to texture unit 0
             // This makes the texture available to the fragment shader

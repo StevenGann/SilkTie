@@ -5,8 +5,8 @@ using SilkTriangleApp;
 class Program
 {
     // Benchmark configuration
-    private const int MaxSprites = 100_000;
-    private const int SpriteIncrement = 1000;
+    private const int MaxSprites = int.MaxValue;
+    private const int SpriteIncrement = 100;
     private const int TargetFPS = 60;
     
     // Bunny physics record
@@ -125,8 +125,8 @@ class Program
             );
 
             var scale = new Vector2(
-                (random.Next(10, 20) / 100.0f),
-                (random.Next(10, 20) / 100.0f)
+                (random.Next(10, 20) / 200.0f),
+                (random.Next(10, 20) / 200.0f)
             );
             
             bunnies[bunnyCount] = new Bunny(position, speed, scale, textureHandle);
@@ -141,10 +141,10 @@ class Program
             ref var bunny = ref bunnies[i];
             
             // Integrate position
-            bunny.Position += bunny.Speed;
+            bunny.Position += bunny.Speed * 0.1f;
             
             // Bounce off screen borders (NDC coordinates)
-            if (bunny.Position.X <= -2.0f || bunny.Position.X >= 2.0f)
+            if (bunny.Position.X <= -1.0f || bunny.Position.X >= 1.0f)
             {
                 bunny.Speed.X *= -1;
             }
