@@ -838,6 +838,135 @@ public class Renderer2D : IRenderer
     }
 
     /// <summary>
+    /// Updates the position of a sprite at the specified index.
+    /// </summary>
+    /// <param name="index">The index of the sprite to update.</param>
+    /// <param name="position">The new position.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when index is out of range.</exception>
+    public void UpdateSpritePosition(int index, Vector2 position)
+    {
+        lock (_spritesLock)
+        {
+            if (index < 0 || index >= _sprites.Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            
+            var sprite = _sprites[index];
+            sprite.Position = position;
+            _sprites[index] = sprite;
+            _spritesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Updates the scale of a sprite at the specified index.
+    /// </summary>
+    /// <param name="index">The index of the sprite to update.</param>
+    /// <param name="scale">The new scale.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when index is out of range.</exception>
+    public void UpdateSpriteScale(int index, Vector2 scale)
+    {
+        lock (_spritesLock)
+        {
+            if (index < 0 || index >= _sprites.Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            
+            var sprite = _sprites[index];
+            sprite.Scale = scale;
+            _sprites[index] = sprite;
+            _spritesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Updates the rotation of a sprite at the specified index.
+    /// </summary>
+    /// <param name="index">The index of the sprite to update.</param>
+    /// <param name="rotation">The new rotation in radians.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when index is out of range.</exception>
+    public void UpdateSpriteRotation(int index, float rotation)
+    {
+        lock (_spritesLock)
+        {
+            if (index < 0 || index >= _sprites.Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            
+            var sprite = _sprites[index];
+            sprite.Rotation = rotation;
+            _sprites[index] = sprite;
+            _spritesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Updates the texture handle of a sprite at the specified index.
+    /// </summary>
+    /// <param name="index">The index of the sprite to update.</param>
+    /// <param name="textureHandle">The new texture handle.</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when index is out of range.</exception>
+    public void UpdateSpriteTexture(int index, uint textureHandle)
+    {
+        lock (_spritesLock)
+        {
+            if (index < 0 || index >= _sprites.Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            
+            var sprite = _sprites[index];
+            sprite.TextureHandle = textureHandle;
+            _sprites[index] = sprite;
+            _spritesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Updates multiple properties of a sprite at the specified index.
+    /// </summary>
+    /// <param name="index">The index of the sprite to update.</param>
+    /// <param name="position">The new position (optional).</param>
+    /// <param name="scale">The new scale (optional).</param>
+    /// <param name="rotation">The new rotation in radians (optional).</param>
+    /// <param name="textureHandle">The new texture handle (optional).</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when index is out of range.</exception>
+    public void UpdateSprite(int index, Vector2? position = null, Vector2? scale = null, float? rotation = null, uint? textureHandle = null)
+    {
+        lock (_spritesLock)
+        {
+            if (index < 0 || index >= _sprites.Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            
+            var sprite = _sprites[index];
+            
+            if (position.HasValue)
+                sprite.Position = position.Value;
+            if (scale.HasValue)
+                sprite.Scale = scale.Value;
+            if (rotation.HasValue)
+                sprite.Rotation = rotation.Value;
+            if (textureHandle.HasValue)
+                sprite.TextureHandle = textureHandle.Value;
+            
+            _sprites[index] = sprite;
+            _spritesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Gets a sprite at the specified index.
+    /// </summary>
+    /// <param name="index">The index of the sprite to access.</param>
+    /// <returns>A copy of the sprite at the specified index.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when index is out of range.</exception>
+    public Sprite GetSprite(int index)
+    {
+        lock (_spritesLock)
+        {
+            if (index < 0 || index >= _sprites.Count)
+                throw new ArgumentOutOfRangeException(nameof(index));
+            
+            return _sprites[index];
+        }
+    }
+
+    /// <summary>
     /// Gets the number of sprites currently in the renderer.
     /// </summary>
     /// <returns>The number of sprites.</returns>
