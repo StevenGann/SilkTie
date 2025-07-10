@@ -6,6 +6,7 @@ using Silk.NET.Maths;
 using System.Drawing;
 using StbImageSharp;
 using System.IO;
+using System.Numerics;
 
 namespace SilkTriangleApp;
 
@@ -15,22 +16,29 @@ namespace SilkTriangleApp;
 /// <remarks>
 /// This renderer creates and renders a textured quad using modern OpenGL features
 /// including Vertex Array Objects (VAOs), Vertex Buffer Objects (VBOs), Element Buffer Objects (EBOs),
-/// custom shaders, and texture loading with alpha blending support.
+/// custom shaders, texture loading with alpha blending support, and transformation matrices.
 /// 
 /// The renderer loads a texture from a PNG file and applies it to a quad with proper
-/// texture coordinates and alpha blending. It serves as a foundation for 2D graphics
-/// rendering with textures in the application.
+/// texture coordinates and alpha blending. It supports translation, scale, and rotation
+/// transformations through uniform matrices passed to the vertex shader.
 /// 
 /// The quad is rendered in normalized device coordinates (NDC) with vertices at
-/// the corners of a square, creating a textured rectangle centered in the viewport.
+/// the corners of a square, creating a textured rectangle that can be transformed
+/// in real-time.
 /// </remarks>
 /// <example>
 /// <code>
 /// // Create and add the 2D renderer to a window manager
 /// var windowManager = new WindowManager();
-/// windowManager.AddRenderer(new Renderer2D());
+/// var renderer = new Renderer2D();
+/// windowManager.AddRenderer(renderer);
 /// windowManager.CreateWindow();
 /// windowManager.Run();
+/// 
+/// // Set transformations
+/// renderer.SetTranslation(0.5f, 0.0f);
+/// renderer.SetScale(2.0f, 2.0f);
+/// renderer.SetRotation(45.0f); // degrees
 /// </code>
 /// </example>
 /// <seealso cref="IRenderer"/>
@@ -145,6 +153,62 @@ public class Renderer2D : IRenderer
     private uint _texture;
 
     /// <summary>
+    /// The transformation matrix that combines translation, scale, and rotation.
+    /// </summary>
+    /// <remarks>
+    /// This matrix is calculated by combining the individual transformation matrices
+    /// and is updated whenever any transformation parameter changes. It's passed
+    /// to the vertex shader as a uniform to transform the quad vertices.
+    /// </remarks>
+    private Matrix4x4 _transformMatrix = Matrix4x4.Identity;
+
+    /// <summary>
+    /// The translation vector for moving the quad.
+    /// </summary>
+    /// <remarks>
+    /// This vector represents the offset in x and y directions. Values are in
+    /// normalized device coordinates (NDC) where the screen ranges from -1 to +1
+    /// in both dimensions.
+    /// </remarks>
+    private Vector2 _translation = Vector2.Zero;
+
+    /// <summary>
+    /// The scale vector for resizing the quad.
+    /// </summary>
+    /// <remarks>
+    /// This vector represents the scale factors in x and y directions. A value of
+    /// 1.0 means no scaling, 2.0 means double size, 0.5 means half size, etc.
+    /// </remarks>
+    private Vector2 _scale = Vector2.One;
+
+    /// <summary>
+    /// The rotation angle in radians.
+    /// </summary>
+    /// <remarks>
+    /// This value represents the rotation around the Z-axis in radians.
+    /// Positive values rotate counterclockwise, negative values rotate clockwise.
+    /// </remarks>
+    private float _rotation = 0.0f;
+
+    /// <summary>
+    /// Flag indicating whether the transformation matrix needs to be recalculated.
+    /// </summary>
+    /// <remarks>
+    /// This flag is set to true whenever any transformation parameter changes.
+    /// It's checked during rendering to avoid unnecessary matrix recalculations.
+    /// </remarks>
+    private bool _transformDirty = true;
+
+    /// <summary>
+    /// Location of the transform matrix uniform in the shader program.
+    /// </summary>
+    /// <remarks>
+    /// This location is obtained during shader program creation and is used
+    /// to update the transformation matrix uniform during rendering.
+    /// </remarks>
+    private int _transformMatrixLocation;
+
+    /// <summary>
     /// Initializes the 2D renderer with the specified window and OpenGL context.
     /// </summary>
     /// <param name="window">The window to associate with this renderer.</param>
@@ -157,17 +221,19 @@ public class Renderer2D : IRenderer
     /// <item><description>Creates and populates the Vertex Buffer Object (VBO) with quad data</description></item>
     /// <item><description>Creates and populates the Element Buffer Object (EBO) with index data</description></item>
     /// <item><description>Sets up vertex attribute pointers for position and texture coordinate data</description></item>
-    /// <item><description>Compiles and links vertex and fragment shaders</description></item>
+    /// <item><description>Compiles and links vertex and fragment shaders with transformation support</description></item>
     /// <item><description>Creates the shader program</description></item>
     /// <item><description>Loads and configures the texture with proper parameters</description></item>
     /// <item><description>Enables alpha blending for transparency support</description></item>
     /// <item><description>Sets the clear color for the background</description></item>
+    /// <item><description>Initializes transformation matrices and uniform locations</description></item>
     /// </list>
     /// 
     /// The initialization process follows modern OpenGL best practices by using
     /// VAOs, VBOs, and EBOs for efficient vertex data management. The texture
     /// is loaded using StbImageSharp and configured with proper filtering and
-    /// wrapping modes.
+    /// wrapping modes. The shaders include transformation matrix support for
+    /// real-time positioning, scaling, and rotation of the quad.
     /// </remarks>
     /// <exception cref="ArgumentNullException">
     /// Thrown when <paramref name="window"/> or <paramref name="gl"/> is null.
@@ -267,7 +333,7 @@ public class Renderer2D : IRenderer
         _gl.EnableVertexAttribArray(1);
 
         // Create vertex shader source code
-        // This shader transforms vertex positions from NDC to clip space and passes texture coordinates
+        // This shader transforms vertex positions using a transformation matrix and passes texture coordinates
         string vertexShaderSource = @"
             #version 330 core
             layout (location = 0) in vec3 aPosition;
@@ -275,9 +341,11 @@ public class Renderer2D : IRenderer
             
             out vec2 frag_texCoords;
             
+            uniform mat4 uTransform;
+            
             void main()
             {
-                gl_Position = vec4(aPosition, 1.0);
+                gl_Position = uTransform * vec4(aPosition, 1.0);
                 frag_texCoords = aTexCoords;
             }";
 
@@ -334,6 +402,9 @@ public class Renderer2D : IRenderer
         _gl.DeleteShader(vertexShader);
         _gl.DeleteShader(fragmentShader);
 
+        // Get uniform locations
+        _transformMatrixLocation = _gl.GetUniformLocation(_shaderProgram, "uTransform");
+
         // Create and configure texture
         _texture = _gl.GenTexture();
         _gl.ActiveTexture(TextureUnit.Texture0);
@@ -371,7 +442,7 @@ public class Renderer2D : IRenderer
 
             // Filtering: use bilinear filtering for smooth texture sampling
             _gl.TextureParameter(_texture, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
-            _gl.TextureParameter(_texture, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            _gl.TextureParameter(_texture, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
 
             // Generate mipmaps for better quality when texture is scaled down
             _gl.GenerateMipmap(TextureTarget.Texture2D);
@@ -466,6 +537,142 @@ public class Renderer2D : IRenderer
     }
 
     /// <summary>
+    /// Sets the translation (position) of the quad.
+    /// </summary>
+    /// <param name="x">The X translation in normalized device coordinates (-1 to +1).</param>
+    /// <param name="y">The Y translation in normalized device coordinates (-1 to +1).</param>
+    /// <remarks>
+    /// This method sets the position of the quad relative to the center of the screen.
+    /// The coordinates are in normalized device coordinates (NDC) where:
+    /// - (-1, -1) is the bottom-left corner
+    /// - (0, 0) is the center of the screen
+    /// - (1, 1) is the top-right corner
+    /// 
+    /// The translation is applied before scaling and rotation.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// renderer.SetTranslation(0.5f, 0.0f);  // Move right by half the screen width
+    /// renderer.SetTranslation(-0.3f, 0.7f); // Move left and up
+    /// </code>
+    /// </example>
+    public void SetTranslation(float x, float y)
+    {
+        _translation = new Vector2(x, y);
+        _transformDirty = true;
+    }
+
+    /// <summary>
+    /// Sets the scale (size) of the quad.
+    /// </summary>
+    /// <param name="x">The X scale factor (1.0 = original size, 2.0 = double size, 0.5 = half size).</param>
+    /// <param name="y">The Y scale factor (1.0 = original size, 2.0 = double size, 0.5 = half size).</param>
+    /// <remarks>
+    /// This method sets the size of the quad relative to its original size.
+    /// Scale factors work as follows:
+    /// - 1.0: Original size (no scaling)
+    /// - 2.0: Double size
+    /// - 0.5: Half size
+    /// - Negative values: Mirror the quad
+    /// 
+    /// The scaling is applied after translation but before rotation.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// renderer.SetScale(2.0f, 2.0f);  // Make the quad twice as large
+    /// renderer.SetScale(1.0f, 0.5f);  // Stretch horizontally, shrink vertically
+    /// renderer.SetScale(-1.0f, 1.0f); // Mirror horizontally
+    /// </code>
+    /// </example>
+    public void SetScale(float x, float y)
+    {
+        _scale = new Vector2(x, y);
+        _transformDirty = true;
+    }
+
+    /// <summary>
+    /// Sets the rotation of the quad around its center.
+    /// </summary>
+    /// <param name="angleDegrees">The rotation angle in degrees (positive = counterclockwise).</param>
+    /// <remarks>
+    /// This method sets the rotation of the quad around its center point.
+    /// The rotation is applied after translation and scaling.
+    /// 
+    /// Angle values:
+    /// - 0°: No rotation
+    /// - 90°: Rotate 90 degrees counterclockwise
+    /// - 180°: Rotate 180 degrees (upside down)
+    /// - -45°: Rotate 45 degrees clockwise
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// renderer.SetRotation(45.0f);   // Rotate 45 degrees counterclockwise
+    /// renderer.SetRotation(90.0f);   // Rotate 90 degrees counterclockwise
+    /// renderer.SetRotation(-30.0f);  // Rotate 30 degrees clockwise
+    /// </code>
+    /// </example>
+    public void SetRotation(float angleDegrees)
+    {
+        _rotation = angleDegrees * MathF.PI / 180.0f; // Convert degrees to radians
+        _transformDirty = true;
+    }
+
+    /// <summary>
+    /// Sets all transformations at once for convenience.
+    /// </summary>
+    /// <param name="translation">The translation vector (x, y).</param>
+    /// <param name="scale">The scale vector (x, y).</param>
+    /// <param name="rotationDegrees">The rotation angle in degrees.</param>
+    /// <remarks>
+    /// This method allows setting all transformation parameters in a single call,
+    /// which is more efficient than calling the individual setter methods multiple times.
+    /// 
+    /// The transformations are applied in the order: translation → scale → rotation.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// renderer.SetTransform(
+    ///     new Vector2(0.5f, 0.0f),  // Translation
+    ///     new Vector2(2.0f, 2.0f),  // Scale
+    ///     45.0f                      // Rotation
+    /// );
+    /// </code>
+    /// </example>
+    public void SetTransform(Vector2 translation, Vector2 scale, float rotationDegrees)
+    {
+        _translation = translation;
+        _scale = scale;
+        _rotation = rotationDegrees * MathF.PI / 180.0f; // Convert degrees to radians
+        _transformDirty = true;
+    }
+
+    /// <summary>
+    /// Recalculates the transformation matrix from the current transformation parameters.
+    /// </summary>
+    /// <remarks>
+    /// This method combines the translation, scale, and rotation matrices into a single
+    /// transformation matrix. The transformations are applied in the order:
+    /// translation → scale → rotation.
+    /// 
+    /// The resulting matrix is used by the vertex shader to transform the quad vertices.
+    /// This method is called automatically when the transformation matrix is dirty.
+    /// </remarks>
+    private void UpdateTransformMatrix()
+    {
+        if (!_transformDirty) return;
+
+        // Create transformation matrices
+        var translationMatrix = Matrix4x4.CreateTranslation(_translation.X, _translation.Y, 0.0f);
+        var scaleMatrix = Matrix4x4.CreateScale(_scale.X, _scale.Y, 1.0f);
+        var rotationMatrix = Matrix4x4.CreateRotationZ(_rotation);
+
+        // Combine transformations: translation * scale * rotation
+        _transformMatrix = translationMatrix * scaleMatrix * rotationMatrix;
+
+        _transformDirty = false;
+    }
+
+    /// <summary>
     /// Renders the 2D textured quad for the current frame.
     /// </summary>
     /// <param name="deltaTime">The time elapsed since the last frame in seconds.</param>
@@ -473,16 +680,19 @@ public class Renderer2D : IRenderer
     /// This method performs the following rendering steps:
     /// <list type="number">
     /// <item><description>Checks if OpenGL context is available</description></item>
+    /// <item><description>Updates the transformation matrix if needed</description></item>
     /// <item><description>Clears the screen with the background color</description></item>
     /// <item><description>Activates the shader program</description></item>
+    /// <item><description>Updates the transformation matrix uniform</description></item>
     /// <item><description>Binds the texture to texture unit 0</description></item>
     /// <item><description>Binds the VAO containing vertex data</description></item>
     /// <item><description>Draws the quad using indexed rendering</description></item>
     /// </list>
     /// 
     /// The rendering process uses the modern OpenGL pipeline with shaders.
-    /// The vertex shader transforms the quad vertices and passes texture coordinates,
-    /// and the fragment shader samples the texture to color each pixel.
+    /// The vertex shader transforms the quad vertices using the transformation matrix
+    /// and passes texture coordinates, and the fragment shader samples the texture
+    /// to color each pixel.
     /// 
     /// If the OpenGL context is not available, this method does nothing,
     /// allowing the application to continue without errors.
@@ -501,6 +711,9 @@ public class Renderer2D : IRenderer
             return; // Exit early if OpenGL is not initialized
         }
 
+        // Update transformation matrix if needed
+        UpdateTransformMatrix();
+
         // Clear the screen with the background color
         // This ensures we start with a clean slate each frame
         _gl.Clear(ClearBufferMask.ColorBufferBit);
@@ -508,6 +721,16 @@ public class Renderer2D : IRenderer
         // Activate the shader program
         // This tells OpenGL which shaders to use for rendering
         _gl.UseProgram(_shaderProgram);
+
+        // Update the transformation matrix uniform
+        // This passes the transformation matrix to the vertex shader
+        unsafe
+        {
+            fixed (float* matrixPtr = &_transformMatrix.M11)
+            {
+                _gl.UniformMatrix4(_transformMatrixLocation, 1, false, matrixPtr);
+            }
+        }
 
         // Bind the texture to texture unit 0
         // This makes the texture available to the fragment shader
