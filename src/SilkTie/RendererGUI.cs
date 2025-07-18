@@ -7,7 +7,7 @@ using Silk.NET.Input;
 using System.Drawing;
 using Silk.NET.Maths;
 
-namespace SilkTriangleApp;
+namespace SilkTie;
 
 /// <summary>
 /// ImGui-based GUI renderer that provides immediate mode user interface rendering.

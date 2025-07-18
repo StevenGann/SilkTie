@@ -8,7 +8,7 @@ using StbImageSharp;
 using System.IO;
 using System.Numerics;
 
-namespace SilkTriangleApp;
+namespace SilkTie;
 
 /// <summary>
 /// 2D textured quad renderer that demonstrates texture loading and rendering using modern OpenGL techniques.
@@ -45,6 +45,37 @@ namespace SilkTriangleApp;
 /// <seealso cref="WindowManager"/>
 public class Renderer2D : IRenderer
 {
+    /// <summary>
+    /// Initializes a new instance of the Renderer2D class with the default texture.
+    /// </summary>
+    /// <remarks>
+    /// This constructor creates a Renderer2D that will attempt to load "texture.png"
+    /// from the application directory. If the file is not found, a fallback texture
+    /// will be created instead.
+    /// </remarks>
+    public Renderer2D() : this(null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the Renderer2D class with a specified texture file.
+    /// </summary>
+    /// <param name="texturePath">The path to the texture file to load. If null, uses "texture.png".</param>
+    /// <remarks>
+    /// This constructor allows specifying a custom texture file path. The texture
+    /// will be loaded during initialization. If the file is not found, a fallback
+    /// texture will be created instead.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var renderer = new Renderer2D("silk.png");
+    /// </code>
+    /// </example>
+        public Renderer2D(string? texturePath)
+    {
+        _texturePath = texturePath;
+    }
+
     /// <summary>
     /// The OpenGL context used for rendering operations.
     /// </summary>
@@ -143,6 +174,71 @@ public class Renderer2D : IRenderer
     private uint _shaderProgram;
 
     /// <summary>
+    /// The compiled and linked shader program used for solid color rendering.
+    /// </summary>
+    /// <remarks>
+    /// This shader program is used for rendering solid color triangles and lines.
+    /// It uses a simpler vertex shader and a fragment shader that outputs a solid color.
+    /// </remarks>
+    private uint _solidColorShaderProgram;
+
+    /// <summary>
+    /// Vertex Array Object (VAO) for solid color rendering.
+    /// </summary>
+    /// <remarks>
+    /// This VAO is used for rendering solid color triangles and lines.
+    /// It stores the vertex attribute configuration for position-only vertices.
+    /// </remarks>
+    private uint _solidColorVao;
+
+    /// <summary>
+    /// Vertex Buffer Object (VBO) for solid color rendering.
+    /// </summary>
+    /// <remarks>
+    /// This VBO stores vertex data for solid color triangles and lines.
+    /// It contains only position data (x, y, z) without texture coordinates.
+    /// </remarks>
+    private uint _solidColorVbo;
+
+    /// <summary>
+    /// Element Buffer Object (EBO) for solid color rendering.
+    /// </summary>
+    /// <remarks>
+    /// This EBO stores index data for solid color triangles and lines.
+    /// It allows for efficient rendering by reusing vertices.
+    /// </remarks>
+    private uint _solidColorEbo;
+
+    /// <summary>
+    /// Location of the color uniform in the solid color shader program.
+    /// </summary>
+    /// <remarks>
+    /// This location is obtained during shader program creation and is used
+    /// to update the color uniform during rendering.
+    /// </remarks>
+    private int _colorUniformLocation;
+
+    /// <summary>
+    /// Collection of triangles to render.
+    /// </summary>
+    /// <remarks>
+    /// This list stores all triangles that should be rendered each frame.
+    /// Each triangle consists of 3 Vector2 points and a color.
+    /// Triangles are rendered in the order they appear in this list.
+    /// </remarks>
+    private readonly List<(Vector2[] points, Vector4 color)> _triangles = new();
+    private readonly object _trianglesLock = new object();
+
+    /// <summary>
+    /// Flag indicating whether the triangle collection has been modified.
+    /// </summary>
+    /// <remarks>
+    /// This flag is used to optimize rendering by avoiding unnecessary
+    /// operations when no triangles have been added or removed.
+    /// </remarks>
+    private bool _trianglesModified = false;
+
+    /// <summary>
     /// The OpenGL texture object that stores the loaded texture data.
     /// </summary>
     /// <remarks>
@@ -151,6 +247,15 @@ public class Renderer2D : IRenderer
     /// colors for each pixel of the quad.
     /// </remarks>
     private uint _texture;
+
+    /// <summary>
+    /// The path to the texture file to load.
+    /// </summary>
+    /// <remarks>
+    /// This path specifies which texture file to load during initialization.
+    /// If null or empty, the default "texture.png" will be used.
+    /// </remarks>
+    private readonly string? _texturePath;
 
     /// <summary>
     /// The transformation matrix that combines translation, scale, and rotation.
@@ -474,7 +579,12 @@ public class Renderer2D : IRenderer
         _scaleLocation = _gl.GetUniformLocation(_shaderProgram, "uScale");
         _rotationLocation = _gl.GetUniformLocation(_shaderProgram, "uRotation");
         _textureUniformLocation = _gl.GetUniformLocation(_shaderProgram, "uTexture");
-        
+
+        // Create solid color shader program
+        CreateSolidColorShaderProgram();
+
+        // Create and configure solid color rendering objects
+        CreateSolidColorRenderingObjects();
 
 
         // Create and configure texture
@@ -485,8 +595,15 @@ public class Renderer2D : IRenderer
         // Load texture from file
         try
         {
+            // Use the specified texture path or default to "texture.png"
+            string textureFile = string.IsNullOrEmpty(_texturePath) ? "texture.png" : _texturePath;
+            
+            Console.WriteLine($"Loading texture from: {textureFile}");
+            
             // Use StbImageSharp to load an image from our PNG file
-            ImageResult result = ImageResult.FromMemory(File.ReadAllBytes("texture.png"), ColorComponents.RedGreenBlueAlpha);
+            ImageResult result = ImageResult.FromMemory(File.ReadAllBytes(textureFile), ColorComponents.RedGreenBlueAlpha);
+            
+            Console.WriteLine($"Texture loaded successfully! Size: {result.Width}x{result.Height}, Components: {result.Comp}");
 
             unsafe
             {
@@ -524,14 +641,17 @@ public class Renderer2D : IRenderer
         catch (FileNotFoundException)
         {
             // If texture file is not found, create a simple colored texture
-            Console.WriteLine("Warning: texture.png not found. Creating a simple colored texture instead.");
+            string textureFile = string.IsNullOrEmpty(_texturePath) ? "texture.png" : _texturePath;
+            Console.WriteLine($"Warning: {textureFile} not found. Creating a simple colored texture instead.");
             CreateFallbackTexture();
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error loading texture: {ex.Message}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
             CreateFallbackTexture();
         }
+
 
         // Unbind texture as we no longer need to update it
         _gl.BindTexture(TextureTarget.Texture2D, 0);
@@ -547,6 +667,122 @@ public class Renderer2D : IRenderer
         _gl.ClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 
         // Unbind VAO and buffers as we don't need them bound anymore
+        _gl.BindVertexArray(0);
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, 0);
+    }
+
+    /// <summary>
+    /// Creates the solid color shader program for rendering triangles and lines.
+    /// </summary>
+    /// <remarks>
+    /// This method creates a simple shader program that renders solid color triangles.
+    /// The vertex shader only handles position data and the fragment shader outputs
+    /// a solid color specified by a uniform.
+    /// </remarks>
+    private void CreateSolidColorShaderProgram()
+    {
+        // Create vertex shader source code for solid color rendering
+        string solidColorVertexShaderSource = @"
+            #version 330 core
+            layout (location = 0) in vec3 aPosition;
+            
+            void main()
+            {
+                gl_Position = vec4(aPosition, 1.0);
+            }";
+
+        // Create fragment shader source code for solid color rendering
+        string solidColorFragmentShaderSource = @"
+            #version 330 core
+            out vec4 FragColor;
+            
+            uniform vec4 uColor;
+            
+            void main()
+            {
+                FragColor = uColor;
+            }";
+
+        // Compile vertex shader
+        uint vertexShader = _gl.CreateShader(ShaderType.VertexShader);
+        _gl.ShaderSource(vertexShader, solidColorVertexShaderSource);
+        _gl.CompileShader(vertexShader);
+
+        // Check vertex shader compilation
+        _gl.GetShader(vertexShader, ShaderParameterName.CompileStatus, out int vStatus);
+        if (vStatus != (int)GLEnum.True)
+            throw new Exception("Solid color vertex shader failed to compile: " + _gl.GetShaderInfoLog(vertexShader));
+
+        // Compile fragment shader
+        uint fragmentShader = _gl.CreateShader(ShaderType.FragmentShader);
+        _gl.ShaderSource(fragmentShader, solidColorFragmentShaderSource);
+        _gl.CompileShader(fragmentShader);
+
+        // Check fragment shader compilation
+        _gl.GetShader(fragmentShader, ShaderParameterName.CompileStatus, out int fStatus);
+        if (fStatus != (int)GLEnum.True)
+            throw new Exception("Solid color fragment shader failed to compile: " + _gl.GetShaderInfoLog(fragmentShader));
+
+        // Create and link shader program
+        _solidColorShaderProgram = _gl.CreateProgram();
+        _gl.AttachShader(_solidColorShaderProgram, vertexShader);
+        _gl.AttachShader(_solidColorShaderProgram, fragmentShader);
+        _gl.LinkProgram(_solidColorShaderProgram);
+
+        // Check program linking
+        _gl.GetProgram(_solidColorShaderProgram, ProgramPropertyARB.LinkStatus, out int lStatus);
+        if (lStatus != (int)GLEnum.True)
+            throw new Exception("Solid color program failed to link: " + _gl.GetProgramInfoLog(_solidColorShaderProgram));
+
+        // Clean up individual shaders after linking
+        _gl.DetachShader(_solidColorShaderProgram, vertexShader);
+        _gl.DetachShader(_solidColorShaderProgram, fragmentShader);
+        _gl.DeleteShader(vertexShader);
+        _gl.DeleteShader(fragmentShader);
+
+        // Get uniform location for color
+        _colorUniformLocation = _gl.GetUniformLocation(_solidColorShaderProgram, "uColor");
+    }
+
+    /// <summary>
+    /// Creates and configures the rendering objects for solid color triangles.
+    /// </summary>
+    /// <remarks>
+    /// This method creates the VAO, VBO, and EBO for solid color rendering.
+    /// These objects are configured to handle position-only vertex data.
+    /// </remarks>
+    private void CreateSolidColorRenderingObjects()
+    {
+        // Create and bind Vertex Array Object (VAO) for solid color rendering
+        _solidColorVao = _gl.GenVertexArray();
+        _gl.BindVertexArray(_solidColorVao);
+
+        // Create and bind Vertex Buffer Object (VBO) for solid color rendering
+        _solidColorVbo = _gl.GenBuffer();
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _solidColorVbo);
+
+        // Create and bind Element Buffer Object (EBO) for solid color rendering
+        _solidColorEbo = _gl.GenBuffer();
+        _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _solidColorEbo);
+
+        // Set up vertex attribute pointer for position only
+        unsafe
+        {
+            _gl.VertexAttribPointer(
+                0,                              // Attribute location
+                3,                              // Number of components per vertex (x, y, z)
+                VertexAttribPointerType.Float,  // Data type
+                false,                          // Normalized
+                3 * sizeof(float),              // Stride (3 floats for position)
+                (void*)0                        // Offset
+            );
+        }
+
+        // Enable the vertex attribute array
+        _gl.EnableVertexAttribArray(0);
+
+        // Unbind VAO and buffers
         _gl.BindVertexArray(0);
         _gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
         _gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, 0);
@@ -1057,6 +1293,135 @@ public class Renderer2D : IRenderer
     public uint DefaultTextureHandle => _texture;
 
     /// <summary>
+    /// Draws a triangle using the specified points and color.
+    /// </summary>
+    /// <param name="points">Array of exactly 3 Vector2 points defining the triangle vertices.</param>
+    /// <param name="color">The color to fill the triangle with.</param>
+    /// <remarks>
+    /// This method adds a triangle to the rendering queue. The triangle will be rendered
+    /// as a solid color shape using the specified points and color. The points should be
+    /// in normalized device coordinates (NDC) where the screen ranges from -1 to +1.
+    /// 
+    /// The triangle is rendered using the solid color shader program, which is more
+    /// efficient than the textured shader for simple shapes.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when points array doesn't contain exactly 3 points.</exception>
+    /// <example>
+    /// <code>
+    /// // Draw a red triangle
+    /// renderer.DrawTriangles(
+    ///     new Vector2[] { 
+    ///         new Vector2(0.0f, 0.5f),   // Top
+    ///         new Vector2(-0.5f, -0.5f), // Bottom left
+    ///         new Vector2(0.5f, -0.5f)   // Bottom right
+    ///     },
+    ///     new Vector4(1.0f, 0.0f, 0.0f, 1.0f) // Red
+    /// );
+    /// </code>
+    /// </example>
+    public void DrawTriangles(Vector2[] points, Vector4 color)
+    {
+        if (points == null || points.Length != 3)
+            throw new ArgumentException("DrawTriangles requires exactly 3 points.", nameof(points));
+
+        lock (_trianglesLock)
+        {
+            _triangles.Add((points, color));
+            _trianglesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Draws multiple triangles using the specified points and color.
+    /// </summary>
+    /// <param name="points">Array of Vector2 points. Must contain a multiple of 3 points.</param>
+    /// <param name="color">The color to fill all triangles with.</param>
+    /// <remarks>
+    /// This method adds multiple triangles to the rendering queue. The points array
+    /// should contain a multiple of 3 points, where each group of 3 points defines
+    /// one triangle. All triangles will be rendered with the same color.
+    /// 
+    /// This is more efficient than calling DrawTriangles multiple times for the same color.
+    /// </remarks>
+    /// <exception cref="ArgumentException">Thrown when points array length is not a multiple of 3.</exception>
+    /// <example>
+    /// <code>
+    /// // Draw two blue triangles
+    /// renderer.DrawTriangles(
+    ///     new Vector2[] { 
+    ///         // First triangle
+    ///         new Vector2(0.0f, 0.5f), new Vector2(-0.5f, -0.5f), new Vector2(0.5f, -0.5f),
+    ///         // Second triangle
+    ///         new Vector2(0.0f, -0.5f), new Vector2(-0.3f, 0.5f), new Vector2(0.3f, 0.5f)
+    ///     },
+    ///     new Vector4(0.0f, 0.0f, 1.0f, 1.0f) // Blue
+    /// );
+    /// </code>
+    /// </example>
+    public void DrawTriangles(Vector2[] points, Vector4 color, int triangleCount)
+    {
+        if (points == null || points.Length != triangleCount * 3)
+            throw new ArgumentException($"DrawTriangles requires exactly {triangleCount * 3} points for {triangleCount} triangles.", nameof(points));
+
+        lock (_trianglesLock)
+        {
+            for (int i = 0; i < triangleCount; i++)
+            {
+                var trianglePoints = new Vector2[]
+                {
+                    points[i * 3],
+                    points[i * 3 + 1],
+                    points[i * 3 + 2]
+                };
+                _triangles.Add((trianglePoints, color));
+            }
+            _trianglesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Clears all triangles from the renderer.
+    /// </summary>
+    /// <remarks>
+    /// This method removes all triangles from the internal collection.
+    /// No triangles will be rendered in subsequent frames until new ones are added.
+    /// 
+    /// This method is thread-safe and can be called from any thread.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// renderer.ClearTriangles(); // Remove all triangles
+    /// </code>
+    /// </example>
+    public void ClearTriangles()
+    {
+        lock (_trianglesLock)
+        {
+            _triangles.Clear();
+            _trianglesModified = true;
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of triangles currently in the renderer.
+    /// </summary>
+    /// <returns>The number of triangles.</returns>
+    /// <remarks>
+    /// This property returns the current count of triangles in the internal collection.
+    /// This can be useful for debugging or performance monitoring.
+    /// </remarks>
+    public int TriangleCount 
+    { 
+        get 
+        { 
+            lock (_trianglesLock) 
+            { 
+                return _triangles.Count; 
+            } 
+        } 
+    }
+
+    /// <summary>
     /// Recalculates the transformation matrix from the current transformation parameters.
     /// </summary>
     /// <remarks>
@@ -1124,15 +1489,24 @@ public class Renderer2D : IRenderer
             return; // Exit early if OpenGL is not initialized
         }
 
-        // Get a thread-safe copy of the sprites list
+        // Get thread-safe copies of the rendering lists
         List<Sprite> spritesToRender;
+        List<(Vector2[] points, Vector4 color)> trianglesToRender;
+        
         lock (_spritesLock)
         {
-            if (_sprites.Count == 0)
-            {
-                return; // Exit early if no sprites to render
-            }
             spritesToRender = new List<Sprite>(_sprites);
+        }
+        
+        lock (_trianglesLock)
+        {
+            trianglesToRender = new List<(Vector2[] points, Vector4 color)>(_triangles);
+        }
+
+        // Exit early if nothing to render
+        if (spritesToRender.Count == 0 && trianglesToRender.Count == 0)
+        {
+            return;
         }
 
 
@@ -1178,6 +1552,69 @@ public class Renderer2D : IRenderer
             unsafe
             {
                 _gl.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedInt, (void*)0);
+            }
+        }
+
+        // Render triangles using solid color shader
+        if (trianglesToRender.Count > 0)
+        {
+            // Switch to solid color shader program
+            _gl.UseProgram(_solidColorShaderProgram);
+            
+            // Bind the solid color VAO
+            _gl.BindVertexArray(_solidColorVao);
+
+            // Render each triangle
+            foreach (var (points, color) in trianglesToRender)
+            {
+                // Convert Vector2 points to float array with Z=0
+                float[] vertices = new float[points.Length * 3];
+                for (int i = 0; i < points.Length; i++)
+                {
+                    vertices[i * 3] = points[i].X;     // X
+                    vertices[i * 3 + 1] = points[i].Y; // Y
+                    vertices[i * 3 + 2] = 0.0f;        // Z
+                }
+
+                // Create indices for the triangle (0, 1, 2)
+                uint[] indices = { 0, 1, 2 };
+
+                // Upload vertex data
+                unsafe
+                {
+                    fixed (void* v = &vertices[0])
+                    {
+                        _gl.BufferData(
+                            BufferTargetARB.ArrayBuffer,
+                            (nuint)(vertices.Length * sizeof(float)),
+                            v,
+                            BufferUsageARB.DynamicDraw
+                        );
+                    }
+                }
+
+                // Upload index data
+                unsafe
+                {
+                    fixed (void* i = &indices[0])
+                    {
+                        _gl.BufferData(
+                            BufferTargetARB.ElementArrayBuffer,
+                            (nuint)(indices.Length * sizeof(uint)),
+                            i,
+                            BufferUsageARB.DynamicDraw
+                        );
+                    }
+                }
+
+                // Set the color uniform
+                _gl.Uniform4(_colorUniformLocation, color.X, color.Y, color.Z, color.W);
+
+                // Draw the triangle
+                unsafe
+                {
+                    _gl.DrawElements(PrimitiveType.Triangles, 3, DrawElementsType.UnsignedInt, (void*)0);
+                }
             }
         }
     }
@@ -1262,6 +1699,12 @@ public class Renderer2D : IRenderer
         // Delete the shader program
         // This frees the GPU memory used to store compiled shaders
         _gl.DeleteProgram(_shaderProgram);
+
+        // Delete solid color rendering objects
+        _gl.DeleteBuffer(_solidColorVbo);
+        _gl.DeleteBuffer(_solidColorEbo);
+        _gl.DeleteVertexArray(_solidColorVao);
+        _gl.DeleteProgram(_solidColorShaderProgram);
 
         // Clear references to help with garbage collection
         // This prevents potential issues with disposed OpenGL contexts

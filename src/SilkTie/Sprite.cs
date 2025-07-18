@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace SilkTriangleApp;
+namespace SilkTie;
 
 /// <summary>
 /// Represents a sprite with position, scale, rotation, and texture information.

@@ -2,7 +2,7 @@ using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
 
-namespace SilkTriangleApp;
+namespace SilkTie;
 
 /// <summary>
 /// Defines the contract for renderers that can be managed by the WindowManager.

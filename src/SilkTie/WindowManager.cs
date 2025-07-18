@@ -3,7 +3,7 @@ using Silk.NET.Windowing;
 using Silk.NET.OpenGL;
 using Silk.NET.Maths;
 
-namespace SilkTriangleApp;
+namespace SilkTie;
 
 /// <summary>
 /// Manages window creation, lifecycle, and rendering for multiple renderers in a thread-safe manner.
@@ -494,4 +494,4 @@ public class WindowManager : IDisposable
         }
         _window?.Dispose();
     }
-}
+} 
