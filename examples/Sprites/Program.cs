@@ -43,6 +43,47 @@ class Program
                 Console.WriteLine($"Sprite position: {sprite.Position}");
                 Console.WriteLine($"Sprite scale: {sprite.Scale}");
                 Console.WriteLine($"Sprite rotation: {sprite.Rotation}");
+
+                // Draw some solid triangles
+                Console.WriteLine("Drawing solid triangles...");
+                
+                // Draw a red triangle on the left
+                Vector2[] redTriangle = new Vector2[]
+                {
+                    new Vector2(-0.7f, 0.0f),   // Top
+                    new Vector2(-0.9f, -0.3f),  // Bottom left
+                    new Vector2(-0.5f, -0.3f)   // Bottom right
+                };
+                renderer.DrawTriangles(redTriangle, new Vector4(1.0f, 0.0f, 0.0f, 1.0f)); // Red
+                
+                // Draw a green triangle on the right
+                Vector2[] greenTriangle = new Vector2[]
+                {
+                    new Vector2(0.7f, 0.0f),    // Top
+                    new Vector2(0.5f, -0.3f),   // Bottom left
+                    new Vector2(0.9f, -0.3f)    // Bottom right
+                };
+                renderer.DrawTriangles(greenTriangle, new Vector4(0.0f, 1.0f, 0.0f, 1.0f)); // Green
+                
+                // Draw a blue triangle at the top
+                Vector2[] blueTriangle = new Vector2[]
+                {
+                    new Vector2(0.0f, 0.7f),    // Top
+                    new Vector2(-0.2f, 0.4f),   // Bottom left
+                    new Vector2(0.2f, 0.4f)     // Bottom right
+                };
+                renderer.DrawTriangles(blueTriangle, new Vector4(0.0f, 0.0f, 1.0f, 1.0f)); // Blue
+                
+                // Draw a yellow triangle at the bottom
+                Vector2[] yellowTriangle = new Vector2[]
+                {
+                    new Vector2(0.0f, -0.4f),   // Top
+                    new Vector2(-0.2f, -0.7f),  // Bottom left
+                    new Vector2(0.2f, -0.7f)    // Bottom right
+                };
+                renderer.DrawTriangles(yellowTriangle, new Vector4(1.0f, 1.0f, 0.0f, 1.0f)); // Yellow
+                
+                Console.WriteLine("Triangles drawn successfully!");
             };
 
             // Set up window close callback
