@@ -1,7 +1,6 @@
 /reference
-/SilkTriangleApp/bin
-/SilkTriangleApp/obj
+
 SilkTriangleApp/imgui.ini
-/src/SilkTie/obj
-/examples/Sprites/bin
-/examples/Sprites/obj
+
+bin/
+obj/
